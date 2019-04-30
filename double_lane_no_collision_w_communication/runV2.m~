@@ -1,7 +1,65 @@
-% Simulation
+%% MATLAB initialization
+clc
+clear
+close all
+
+% System properties
+ncars       = 5;
+nlane       = 2;
+path        = [0, 100];
+
+% Simulation integrator time step
+tol         = 2;
+dt_sim      = 5*10^-tol;
+
+% Lane choice
+lane_selection = 'v2'; % 'v1', 'v2', 'greedy'
+
+%% Car initialization
+% Create car queue
+
+% Specified conditions
+%{
+collSOI     = {3,3,3,3,3};
+commSOI     = {20,20,20,20,20};
+vLim        = {15,30,5,60,20};
+aLim        = {10,10,10,10,10};
+accel       = {10,10,10,10,10};
+state       = {[0,0,0,0],[0,0,0,0],[0,0,0,0],[0,0,0,0],[0,0,0,0]};
+leader      = 0;
+know        = cell(ncars,1);
+election    = 0;
+c           = cell(ncars,1);
+for i = 1:ncars
+    c{i}    = carV2( i, collSOI{i}, commSOI{i}, vLim{i}, ...
+        aLim{i}, accel{i}, state{i}, path, leader, know, election );
+end
+%}
+
+% Random conditions
+%
+c = cell(ncars,1);
+for i = 1:ncars
+    collSOI = 5;
+    commSOI = 5*collSOI;
+    vLim    = 5*randi(40);
+    aLim    = 10;
+    accel   = 0;
+    state   = [0,0,0,0];
+    leader	= 0;
+    know    = cell(ncars,1);
+    election= 0;
+    c{i}    = carV2( i, collSOI, commSOI, vLim, aLim, accel, ...
+        state, path, leader, know, election );
+end
+%}
+
+
+%% Simulation
 figure
 hold on
 grid on
+% axis equal
 axis([path(1)-1 path(2)+1 0 nlane+1])
 
 % Demarcate the lanes
@@ -87,10 +145,10 @@ while min_pos <= path(2)
                 tmin        = min(time_delta);
                 t_idx       = find(tmin==time_delta);
             elseif strcmp(lane_selection,'v2')
-                vmin        = min(absvel_delta);
-                v_idx       = find(vmin==absvel_delta);
-                tmin        = min(abs(vel_delta(v_idx)));
-                t_idx       = v_idx(tmin==abs(vel_delta(v_idx)));
+                v           = min(absvel_delta);
+                v_idx       = find(v==absvel_delta);
+                [~, t_idx]  = min(abs(vel_delta(v_idx)));
+                t_idx       = v_idx(t_idx);
             elseif strcmp(lane_selection,'greedy')
                 tmin        = min(latest(:,2));
                 t_idx       = find(tmin==latest(:,2));
