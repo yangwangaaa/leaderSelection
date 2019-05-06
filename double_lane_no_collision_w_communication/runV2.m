@@ -2,25 +2,28 @@
 figure
 hold on
 grid on
-axis([path(1)-1 path(2)+1 0 nlane+1])
+axis([path(1)-1 path(3)+1 0 nlane+1])
 
 % Demarcate the lanes
-x = linspace(0,path(2));
+x = linspace(0,path(3));
 for i = 1:nlane+1
     plot(x,(i-0.5)*ones(size(x)),'r-','LineWidth',3)
 end
+plot([path(2), path(2)], [0, nlane+1], 'k--')
 
 % Initialize all car objects
-car = cell(ncars,1);
+car     = cell(ncars,1);
+clabel  = cell(ncars,1);
 for i = 1:ncars
     car{i}  = plot(c{i}.state(1),c{i}.state(2),'ko','MarkerSize',20,...
         'MarkerFaceColor',[0 0 0]);
+    clabel{i} = text(c{i}.state(1),c{i}.state(2),num2str(i));
 end
 
 % Initialize all communication visualization
 for i = 1:ncars
     for j = 1:ncars
-        lin(i,j) = plot(0,0,'g-','LineWidth',2);
+        lin(i,j) = plot(0,0,'g-','LineWidth',1);
         hidem(lin(i,j))
     end
 end
@@ -32,6 +35,13 @@ queue_pos       = 1;
 min_pos         = 0;
 iter            = 1;
 
+% Initialize a queue for all finished cars
+finished        = cell(ncars,1);
+finish_count    = 1;
+
+% Find the minimium x-position of the set of cars
+car_pos = zeros(ncars,1);
+
 % Car 1 initialization
 lane_queue{1}   = c{1};
 c{1}.state(2)   = 1;
@@ -42,10 +52,7 @@ latest(1,1)     = c{1}.ID;          % First car
 latest(1,2)     = (c{1}.path(2) - c{1}.state(1)) / c{1}.vLim;
 latest(1,3)     = c{1}.vLim;
 
-while min_pos <= path(2)
-    
-    % Generate a random number to tell the next car to go
-    go_car      = rand >= 0.5;
+while finish_count <= ncars
     
     % Display results
     clc
@@ -56,19 +63,22 @@ while min_pos <= path(2)
     for i = 1:nlane
         if isempty(lane_queue{i}) || ~isvalid(lane_queue{i})
             latest(i,1) = 0;
-            latest(i,2) = 0;
-            latest(i,3) = 100;
+            latest(i,2) = -inf;
+            latest(i,3) = inf;
         elseif ~isempty(lane_queue{i})
             latest(i,1) = lane_queue{i}.ID;
             latest(i,2) = (lane_queue{i}.path(2) - ...
                 lane_queue{i}.state(1)) / lane_queue{i}.vLim;
-            latest(i,3) = lane_queue{i}.vLim;
+            latest(i,3) = lane_queue{i}.state(3);
         end
         fprintf('%1.0f\t%1.0f\t%f\t%f\n',i,latest(i,1),latest(i,2),latest(i,3))
     end
     
+    % Generate a random number to tell the next car to go
+    go_car      = rand >= 0.9;
+    
     % Lane selection
-    if queue_pos < ncars
+    if queue_pos < ncars && go_car
         
         if c{queue_pos}.state(1) > c{queue_pos}.collSOI + c{queue_pos+1}.collSOI
             
@@ -111,7 +121,7 @@ while min_pos <= path(2)
     % Iterate for every car in the current queue
     for i = 1:queue_pos
         
-        if isvalid(c{i})
+        if c{i}.state(1) < c{i}.path(2)
             
             % Propagate the state
             c{i}.state = c{i}.state + [c{i}.state(3:4), c{i}.accel, 0]*dt_sim;
@@ -128,35 +138,44 @@ while min_pos <= path(2)
                 
                 for k = j-1:-1:1
                     
-                    if (isvalid(c{j}) && isvalid(c{k}))
+                    if ((c{j}.state(1) < c{j}.path(2)) && (c{k}.state(1) < c{k}.path(2)))
                         
                         % Check for collision (only in same lane)
-                        if (abs(c{k}.state(1)-c{j}.state(1)) <= c{j}.collSOI+c{k}.collSOI) && ...
-                                (c{j}.state(2) == c{k}.state(2))
+                        if (abs(c{k}.state(1)-c{j}.state(1)) <= c{j}.collSOI+c{k}.collSOI) && (c{j}.state(2) == c{k}.state(2))
                             c{j}.state(3) = c{k}.state(3);
                             c{j}.accel = 0;
                         end
                         
                         % Check for communication (only in same lane)
-                        if abs(c{j}.state(1)-c{k}.state(1)) <= max([c{j}.commSOI,c{k}.commSOI]) && ...
-                            (c{j}.state(2) == c{k}.state(2))
+                        if abs(c{j}.state(1)-c{k}.state(1)) <= max([c{j}.commSOI,c{k}.commSOI])
                             for l = 1:2
-                                c{j}.know{k} = c{k};
-                                c{k}.know{j} = c{j};
-                                X = [c{j}.state(1), c{k}.state(1)];
-                                Y = [c{j}.state(2), c{k}.state(2)];
-                                
-                                % Visualize communication link
-                                showm(lin(j,k))
-                                set(lin(j,k), 'Xdata', X)
-                                set(lin(j,k), 'Ydata', Y)
+                                c{j}.know{k,1} = c{k};
+                                c{j}.know{k,2} = cur_time;
+                                c{k}.know{j,1} = c{j};
+                                c{k}.know{j,2} = cur_time;
                             end
+                            X = [c{j}.state(1), c{k}.state(1)];
+                            Y = [c{j}.state(2), c{k}.state(2)];
+                            
+                            % Visualize communication link
+                            showm(lin(j,k))
+                            set(lin(j,k), 'Xdata', X)
+                            set(lin(j,k), 'Ydata', Y)
                         else
-                            for l = 1:2
-                                c{j}.know{k} = {};
-                                c{k}.know{j} = {};
-                                hidem(lin(j,k))
+                            hidem(lin(j,k))
+                        end
+                        
+                        % Prepare for leader selection
+                        if strcmp(lead_select,'popular')
+                            const = ~cellfun(@isempty,c{i}.know(:,1));
+                            pop_remain = zeros(size(const));
+                            pop_remain(i) = sum(const)-1;
+                            for loop = 1:length(const)
+                                if const(loop) && loop ~= i
+                                    pop_remain(loop) = sum(~cellfun(@isempty,c{i}.know{loop}.know(:,1))) - 1;
+                                end
                             end
+                            c{i}.election = pop_remain;
                         end
                         
                     end
@@ -166,30 +185,44 @@ while min_pos <= path(2)
             end
             
             % Plot the cars
-            set(car{i}, 'Xdata', c{i}.state(1))
-            set(car{i}, 'Ydata', c{i}.state(2))
-            drawnow
-            
-            % Delete the car from queue if it isn't in the path
-            if c{i}.state(1) > c{i}.path(2)
-                delete(c{i})
-                delete(car{i})
+            if c{i}.state(1) < c{i}.path(2)
+                set(car{i}, 'Xdata', c{i}.state(1))
+                set(car{i}, 'Ydata', c{i}.state(2))
+                set(clabel{i}, 'Position', [c{i}.state(1)-2.5, c{i}.state(2)])
+                set(clabel{i}, 'Color', [1 1 1] );
+                set(clabel{i}, 'FontWeight', 'bold')
+                set(clabel{i}, 'FontSize', 20)
+                drawnow
+            else
+                for loop = 1:2
+                    finished{finish_count} = c{i};
+                end
+                finish_count = finish_count + 1;
                 delete(lin(i,:))
                 delete(lin(:,i))
             end
             
         end
         
-        % M(iter) = getframe;
+        M(iter) = getframe;
         
     end
     
-    % Find the minimium x-position of the set of cars
-    car_pos = [];
-    for i = 1:ncars
-        if isvalid(c{i})
-            car_pos = [car_pos, c{i}.state(1)];
+    % Select the leader
+    for i = 1:queue_pos
+        if strcmp(lead_select,'popular')
+            max_val     = max(c{i}.election);
+            lead_idx    = find(max_val==c{i}.election);
+            for loop = 1:2
+                if ~isempty(lead_idx)
+                    c{i}.leader = c{lead_idx};
+                end
+            end
         end
+    end
+    
+    for i = 1:ncars
+        car_pos(i) = c{i}.state(1);
     end
     min_pos = min(car_pos);
     
@@ -197,17 +230,30 @@ while min_pos <= path(2)
     cur_time = cur_time + dt_sim;
     
     % Recording movie iteration
-    % iter = iter + 1;
+    iter = iter + 1;
     
 end
 
-fprintf('\nTotal time taken for system: %f\n', cur_time)
+% Print out who the leaders are
+all_leaders = [];
+for i = 1:ncars
+    lead_belief = c{i}.leader.ID;
+    lead_inArray = find(lead_belief == all_leaders);
+    if isempty(lead_inArray)
+        all_leaders = [all_leaders, lead_belief];
+    end
+end
+
+fspec = repmat('%d ', 1, length(all_leaders));
+
+fprintf('\nTotal time taken for first leg of system: %f\n\n', cur_time)
+fprintf(['Selected leader(s) are: ', fspec,'\n\n'], all_leaders)
+
 
 % Make movie
-%{
+%
 movie(M,1)
 myVideo = VideoWriter('vid1.avi');
-% uncompressedVideo = VideoWriter('vid1.avi', 'Uncompressed AVI');
 open(myVideo);
 writeVideo(myVideo, M);
 close(myVideo);
